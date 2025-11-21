@@ -2,16 +2,13 @@ pipeline {
     agent any
 
     environment {
-        // Tus datos
         DOCKERHUB_USER   = 'rlealp'
         DOCKERHUB_REPO   = 'backend-test'
         GITHUB_OWNER     = 'RLealP-Duoc'
 
-        // IDs de credenciales en Jenkins
         DOCKERHUB_CRED_ID = 'dockerhub-creds'
         GHCR_CRED_ID      = 'ghcr-creds'
 
-        // Namespace usado en kubernetes.yaml
         K8S_NAMESPACE = 'rleal'
     }
 
@@ -24,19 +21,20 @@ pipeline {
 
         stage('Instalar dependencias') {
             steps {
-                sh 'npm install'
+                bat 'npm install'
             }
         }
 
         stage('Testing') {
             steps {
-                sh 'npm test'
+                // si los tests molestan mucho, luego podemos comentar esta línea
+                bat 'npm test'
             }
         }
 
         stage('Build app') {
             steps {
-                sh 'npm run build'
+                bat 'npm run build'
             }
         }
 
@@ -44,7 +42,7 @@ pipeline {
             steps {
                 script {
                     def localImageTag = "${DOCKERHUB_REPO}:${BUILD_NUMBER}"
-                    sh "docker build -t ${localImageTag} ."
+                    bat "docker build -t ${localImageTag} ."
                 }
             }
         }
@@ -55,18 +53,22 @@ pipeline {
                     def imageTagBuild  = "${DOCKERHUB_USER}/${DOCKERHUB_REPO}:${BUILD_NUMBER}"
                     def imageTagLatest = "${DOCKERHUB_USER}/${DOCKERHUB_REPO}:latest"
 
-                    sh "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${imageTagBuild}"
-                    sh "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${imageTagLatest}"
+                    bat "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${imageTagBuild}"
+                    bat "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${imageTagLatest}"
 
-                    withCredentials([usernamePassword(credentialsId: DOCKERHUB_CRED_ID,
-                                                     usernameVariable: 'DOCKER_USER',
-                                                     passwordVariable: 'DOCKER_PASS')]) {
-                        sh '''
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                            docker push ''' + imageTagBuild + '''
-                            docker push ''' + imageTagLatest + '''
-                            docker logout
-                        '''
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: DOCKERHUB_CRED_ID,
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )
+                    ]) {
+                        bat '''
+docker login -u %DOCKER_USER% -p %DOCKER_PASS%
+docker push %DOCKERHUB_USER%/%DOCKERHUB_REPO%:%BUILD_NUMBER%
+docker push %DOCKERHUB_USER%/%DOCKERHUB_REPO%:latest
+docker logout
+'''
                     }
                 }
             }
@@ -79,18 +81,22 @@ pipeline {
                     def ghcrTagBuild  = "${ghcrBase}:${BUILD_NUMBER}"
                     def ghcrTagLatest = "${ghcrBase}:latest"
 
-                    sh "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${ghcrTagBuild}"
-                    sh "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${ghcrTagLatest}"
+                    bat "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${ghcrTagBuild}"
+                    bat "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${ghcrTagLatest}"
 
-                    withCredentials([usernamePassword(credentialsId: GHCR_CRED_ID,
-                                                     usernameVariable: 'GH_USER',
-                                                     passwordVariable: 'GH_TOKEN')]) {
-                        sh '''
-                            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_USER" --password-stdin
-                            docker push ''' + ghcrTagBuild + '''
-                            docker push ''' + ghcrTagLatest + '''
-                            docker logout ghcr.io
-                        '''
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: GHCR_CRED_ID,
+                            usernameVariable: 'GH_USER',
+                            passwordVariable: 'GH_TOKEN'
+                        )
+                    ]) {
+                        bat '''
+docker login ghcr.io -u %GH_USER% -p %GH_TOKEN%
+docker push ghcr.io/%GITHUB_OWNER%/%DOCKERHUB_REPO%:%BUILD_NUMBER%
+docker push ghcr.io/%GITHUB_OWNER%/%DOCKERHUB_REPO%:latest
+docker logout
+'''
                     }
                 }
             }
@@ -99,19 +105,14 @@ pipeline {
         stage('Deploy a Kubernetes') {
             steps {
                 script {
-                    sh "kubectl get namespace ${K8S_NAMESPACE} || kubectl create namespace ${K8S_NAMESPACE}"
-
-                    sh "kubectl apply -f kubernetes.yaml"
+                    bat "kubectl apply -f kubernetes.yaml"
 
                     def ghcrImageBuild = "ghcr.io/${GITHUB_OWNER}/${DOCKERHUB_REPO}:${BUILD_NUMBER}"
 
-                    sh """
-                        kubectl set image deployment/backend-test-deployment \
-                          backend-test=${ghcrImageBuild} \
-                          -n ${K8S_NAMESPACE}
-                    """
-
-                    sh "kubectl rollout status deployment/backend-test-deployment -n ${K8S_NAMESPACE}"
+                    bat """
+kubectl set image deployment/backend-test-deployment backend-test=${ghcrImageBuild} -n ${K8S_NAMESPACE}
+"""
+                    bat "kubectl rollout status deployment/backend-test-deployment -n ${K8S_NAMESPACE}"
                 }
             }
         }
