@@ -77,7 +77,10 @@ docker logout
         stage('Push GitHub Packages (ghcr.io)') {
             steps {
                 script {
-                    def ghcrBase      = "ghcr.io/${GITHUB_OWNER}/${DOCKERHUB_REPO}"
+                    def ownerLower = GITHUB_OWNER.toLowerCase()
+                    def repoLower = DOCKERHUB_REPO.toLowerCase()
+
+                    def ghcrBase      = "ghcr.io/${ownerLower}/${repoLower}"
                     def ghcrTagBuild  = "${ghcrBase}:${BUILD_NUMBER}"
                     def ghcrTagLatest = "${ghcrBase}:latest"
 
@@ -91,16 +94,17 @@ docker logout
                             passwordVariable: 'GH_TOKEN'
                         )
                     ]) {
-                        bat '''
-docker login ghcr.io -u %GH_USER% -p %GH_TOKEN%
-docker push ghcr.io/%GITHUB_OWNER%/%DOCKERHUB_REPO%:%BUILD_NUMBER%
-docker push ghcr.io/%GITHUB_OWNER%/%DOCKERHUB_REPO%:latest
-docker logout
-'''
+                        bat """
+        docker login ghcr.io -u %GH_USER% -p %GH_TOKEN%
+        docker push ${ghcrTagBuild}
+        docker push ${ghcrTagLatest}
+        docker logout ghcr.io
+        """
                     }
                 }
             }
         }
+
 
         stage('Deploy a Kubernetes') {
             steps {
