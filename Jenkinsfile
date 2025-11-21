@@ -2,14 +2,14 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_USER   = 'rlealp'
-        DOCKERHUB_REPO   = 'backend-test'
-        GITHUB_OWNER     = 'RLealP-Duoc'
+        DOCKERHUB_USER    = 'rlealp'
+        DOCKERHUB_REPO    = 'backend-test'
+        GITHUB_OWNER      = 'RLealP-Duoc'  // Aquí puede ir con mayúsculas, la bajamos luego
 
         DOCKERHUB_CRED_ID = 'dockerhub-creds'
         GHCR_CRED_ID      = 'ghcr-creds'
 
-        K8S_NAMESPACE = 'rleal'
+        K8S_NAMESPACE     = 'rleal'
     }
 
     stages {
@@ -27,7 +27,6 @@ pipeline {
 
         stage('Testing') {
             steps {
-                // si los tests molestan mucho, luego podemos comentar esta línea
                 bat 'npm test'
             }
         }
@@ -50,11 +49,12 @@ pipeline {
         stage('Push Docker Hub') {
             steps {
                 script {
+                    def localImageTag  = "${DOCKERHUB_REPO}:${BUILD_NUMBER}"
                     def imageTagBuild  = "${DOCKERHUB_USER}/${DOCKERHUB_REPO}:${BUILD_NUMBER}"
                     def imageTagLatest = "${DOCKERHUB_USER}/${DOCKERHUB_REPO}:latest"
 
-                    bat "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${imageTagBuild}"
-                    bat "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${imageTagLatest}"
+                    bat "docker tag ${localImageTag} ${imageTagBuild}"
+                    bat "docker tag ${localImageTag} ${imageTagLatest}"
 
                     withCredentials([
                         usernamePassword(
@@ -63,12 +63,12 @@ pipeline {
                             passwordVariable: 'DOCKER_PASS'
                         )
                     ]) {
-                        bat '''
+                        bat """
 docker login -u %DOCKER_USER% -p %DOCKER_PASS%
-docker push %DOCKERHUB_USER%/%DOCKERHUB_REPO%:%BUILD_NUMBER%
-docker push %DOCKERHUB_USER%/%DOCKERHUB_REPO%:latest
+docker push ${imageTagBuild}
+docker push ${imageTagLatest}
 docker logout
-'''
+"""
                     }
                 }
             }
@@ -78,14 +78,14 @@ docker logout
             steps {
                 script {
                     def ownerLower = GITHUB_OWNER.toLowerCase()
-                    def repoLower = DOCKERHUB_REPO.toLowerCase()
+                    def repoLower  = DOCKERHUB_REPO.toLowerCase()
+                    def localImage = "${DOCKERHUB_REPO}:${BUILD_NUMBER}"
 
-                    def ghcrBase      = "ghcr.io/${ownerLower}/${repoLower}"
-                    def ghcrTagBuild  = "${ghcrBase}:${BUILD_NUMBER}"
-                    def ghcrTagLatest = "${ghcrBase}:latest"
+                    def ghcrBuild  = "ghcr.io/${ownerLower}/${repoLower}:${BUILD_NUMBER}"
+                    def ghcrLatest = "ghcr.io/${ownerLower}/${repoLower}:latest"
 
-                    bat "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${ghcrTagBuild}"
-                    bat "docker tag ${DOCKERHUB_REPO}:${BUILD_NUMBER} ${ghcrTagLatest}"
+                    bat "docker tag ${localImage} ${ghcrBuild}"
+                    bat "docker tag ${localImage} ${ghcrLatest}"
 
                     withCredentials([
                         usernamePassword(
@@ -95,27 +95,32 @@ docker logout
                         )
                     ]) {
                         bat """
-        docker login ghcr.io -u %GH_USER% -p %GH_TOKEN%
-        docker push ${ghcrTagBuild}
-        docker push ${ghcrTagLatest}
-        docker logout ghcr.io
-        """
+docker login ghcr.io -u %GH_USER% -p %GH_TOKEN%
+docker push ${ghcrBuild}
+docker push ${ghcrLatest}
+docker logout ghcr.io
+"""
                     }
                 }
             }
         }
 
-
         stage('Deploy a Kubernetes') {
             steps {
                 script {
+                    // Convertir aquí también a lowercase (este era el problema)
+                    def ownerLower = GITHUB_OWNER.toLowerCase()
+                    def repoLower  = DOCKERHUB_REPO.toLowerCase()
+
+                    def ghcrImage = "ghcr.io/${ownerLower}/${repoLower}:${BUILD_NUMBER}"
+
+                    // Aplicar manifiesto
                     bat "kubectl apply -f kubernetes.yaml"
 
-                    def ghcrImageBuild = "ghcr.io/${GITHUB_OWNER}/${DOCKERHUB_REPO}:${BUILD_NUMBER}"
+                    // Este comando era el que quedaba con mayúsculas → corregido
+                    bat "kubectl set image deployment/backend-test-deployment backend-test=${ghcrImage} -n ${K8S_NAMESPACE}"
 
-                    bat """
-kubectl set image deployment/backend-test-deployment backend-test=${ghcrImageBuild} -n ${K8S_NAMESPACE}
-"""
+                    // Esperar rollout
                     bat "kubectl rollout status deployment/backend-test-deployment -n ${K8S_NAMESPACE}"
                 }
             }
@@ -124,13 +129,13 @@ kubectl set image deployment/backend-test-deployment backend-test=${ghcrImageBui
 
     post {
         always {
-            echo "Pipeline finalizado (éxito o fallo)."
+            echo "Pipeline finalizado."
         }
         success {
-            echo "Pipeline OK - Build ${BUILD_NUMBER}"
+            echo "Pipeline OK."
         }
         failure {
-            echo "Pipeline falló - revisar logs."
+            echo "Pipeline falló."
         }
     }
 }
