@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rleal
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: rleal
+data:
+  USERNAME: "ricardo-leal"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+  namespace: rleal
+type: Opaque
+data:
+  API_KEY: "cmxlYWwtYXBpLWtleQ=="
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-test-deployment
+  namespace: rleal
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend-test
+  template:
+    metadata:
+      labels:
+        app: backend-test
+    spec:
+      containers:
+        - name: backend-test
+          image: ghcr.io/RLealP-Duoc/backend-test:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: USERNAME
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: API_KEY
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-test-service
+  namespace: rleal
+spec:
+  type: ClusterIP
+  selector:
+    app: backend-test
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
